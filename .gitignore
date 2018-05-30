@@ -2,7 +2,7 @@
 
 # dependencies
 /node_modules
-
+.tern-port
 # testing
 /coverage
 

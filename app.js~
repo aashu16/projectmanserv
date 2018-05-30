@@ -1,0 +1,198 @@
+var express = require('express');
+var bodyParser = require('body-parser');
+var app = express();
+var session = require('express-session');
+var bcrypt = require('bcryptjs');
+var passport = require('passport');
+var LocalStrategy = require('passport-local').Strategy;
+
+var jwt = require('jsonwebtoken');
+var expressjwt = require('express-jwt');
+
+var passportJWT = require("passport-jwt");
+var ExtractJwt = passportJWT.ExtractJwt;
+var JwtStrategy = passportJWT.Strategy;
+
+var mysql      = require('mysql');
+var connection = mysql.createConnection({
+    host     : 'localhost',
+    user     : 'root',
+    password : 'Randomness1',
+    database : 'pman2'
+});
+
+const saltRounds = 10;
+
+app.use(bodyParser.json());
+
+// passport.use(new LocalStrategy({
+//     usernameField: 'email',
+//     passwordField: 'password',
+//     passReqToCallback: true,
+//     session: false
+// }, function(req, email, password, done) {
+//     connection.query({
+// 	sql: 'select password, idluser from `user_account` where idluser=(select iduser from`user_profile` where email=?)',
+// 	values: [req.body.email]
+//     }, function (error, results) {
+// 	if (error) {
+// 	    return done(error);
+// 	};
+// 	if (!results.length) {
+// 	    console.log('User not found');
+// 	    return done(null, false)
+// 	}
+// 	if (results.length) {
+// 	    bcrypt.compare(req.body.password, results[0].password)
+// 		.then((response) => {
+// 		    if (response === false) {
+// 			console.log('Password incorrect');
+// 			return done(null, false);
+// 		    }
+// 		    if (response === true) {
+// 			console.log('Password correct');
+// 			console.log(JSON.stringify(results[0]));
+// 			var token = jwt.sign({'iduser': results[0].idluser.toString()}, 'fishevauraeionfahweoufeoennnoiregf', {
+// 			    expiresIn: '120'
+// 			});
+// 			console.log(token);
+// 			// return done(null, token)
+// 			return done(null, results[0]);
+// 		    }
+// 		})
+// 		.catch((err) => {
+// 		    console.log(err);
+// 		});
+// 	}
+//     });
+// }))
+
+// app.use(passport.initialize());
+// app.use(passport.session());
+
+app.get('/', function(req, res) {
+    res.send('Hello, World!')
+})
+
+app.get('/users/:id',
+	expressjwt({secret: 'fishevauraeionfahweoufeoennnoiregf'}),
+	function(req, res) {
+    connection.query({
+	sql: 'select * from `user_profile` where `iduser`=?',
+	values:[req.params.id]
+    }, function (error, results, fields) {
+	if (error) throw error;
+	console.log('The solution is: ', results);
+	res.send(results)
+    });
+})
+
+app.post('/signup', function(req, res) {
+    console.log(req.body)
+    connection.query({
+	sql: 'insert into `user_profile` (email, firstname, lastname, createdat) values (?, ?, ?, ?)',
+	values: [req.body.email, req.body.firstname, req.body.lastname, req.body.createdat]
+    }, function (error, results) {
+	if (error) throw error;
+	console.log('The solution is: ', results);
+    });
+    bcrypt.genSalt(saltRounds, function(err, salt) {
+	bcrypt.hash(req.body.password, salt, function(err, hash) {
+            connection.query({
+		sql: 'insert into `user_account` (idluser, password, password_salt, hash_algorithm) values ((select iduser from `user_profile` where email=?), ?, ?, ?)',
+		values: [req.body.email, hash, salt, 'bcrypt']
+	    }, function (error, results) {
+		if (error) throw error;
+	    });
+	});
+    });
+})
+
+app.post('/signin', function(req, res) {
+    console.log(req.body);
+    connection.query({
+	sql: 'select password, idluser from `user_account` where idluser=(select iduser from`user_profile` where email=?)',
+	values: [req.body.email]
+    }, function (error, results, fields) {
+	if (error) throw error;
+	bcrypt.compare(req.body.password, results[0].password)
+	    .then((response) => {
+		if (response === false) {
+		    console.log('Password incorrect');
+		    res.send({success:false});
+		}
+		if (response === true) {
+		    console.log('Password correct');
+		    console.log(JSON.stringify(results[0]));
+		    var token = jwt.sign(
+			{
+			    'iduser': results[0].idluser.toString()
+			},
+			'fishevauraeionfahweoufeoennnoiregf',
+			{
+			    expiresIn: '10h'
+			}
+		    );
+		    console.log(token);
+		    res.send({success: true, token: 'JWT ' + token})
+		    res.redirect('/profile')
+		}
+	    })
+	    .catch((err) => {
+		console.log(err);
+	    });
+    });
+})
+
+app.post('/profile',
+	expressjwt({secret: 'fishevauraeionfahweoufeoennnoiregf'}),
+	function(req, res) {
+	    console.log(req.user);
+	    res.send({success: true, user: req.user, email: req.body.email});
+})
+
+app.post('/new/list',
+	expressjwt({secret: 'fishevauraeionfahweoufeoennnoiregf'}),
+	function(req, res) {
+    console.log(req.body)
+    connection.query({
+	sql: 'insert into `tasklist` (listname, createdby, createdat) values (?, ?, ?)',
+	values: [req.body.listname, req.user.iduser, req.body.createdat]
+    }, function (error, results) {
+	if (error) throw error;
+	console.log('The solution is: ', results);
+	res.send({success: true});
+    });
+})
+
+app.get('/user/lists',
+	expressjwt({secret: 'fishevauraeionfahweoufeoennnoiregf'}),
+	function(req, res) {
+    console.log(req.body)
+    connection.query({
+	sql: 'select idtasklist, listname from `tasklist` where createdby=(?)',
+	values: [req.user.iduser]
+    }, function (error, results) {
+	if (error) throw error;
+	console.log('The solution is: ', results);
+	res.send({success: true, results: results});
+    });
+})
+
+app.post('/new/task',
+	expressjwt({secret: 'fishevauraeionfahweoufeoennnoiregf'}),
+	function(req, res) {
+    console.log(req.body)
+    connection.query({
+	sql: 'insert into `tasks` (task, createdby, createdat, assignee, tasklist) values (?, ?, ?, ?, ?)',
+	values: [req.body.taskbody, req.user.iduser, req.body.createdat, req.body.assignee, req.body.idtasklist]
+    }, function (error, results) {
+	if (error) throw error;
+	console.log('The solution is: ', results);
+	res.send({success: true});
+    });
+})
+
+app.get('/task/:taskId')
+
+app.listen('3000');
